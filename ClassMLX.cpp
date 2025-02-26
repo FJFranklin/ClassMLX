@@ -603,7 +603,7 @@ float MLX::get_Vdd()
     vdd = vdd - 65536;
   }
 
-  int resolutionRAM = (m_raw[832] & 0x0C00) >> 10;
+  int resolutionRAM = m_Resolution;
 
   float resolutionCorrection = pow(2, (double) params->resolutionEE) / pow(2, (double) resolutionRAM);
 
@@ -675,7 +675,7 @@ void MLX::calculate_temperatures() {
   gain = params->gainEE / gain;
 
 //------------------------- To calculation -------------------------------------
-  uint8_t mode = (m_raw[832] & 0x1000) >> 5;
+  uint8_t mode = (m_Mode == MLX90640_CHESS) ? 0x80 : 0x00; // (m_raw[832] & 0x1000) >> 5;
 
   float irDataCP[2];
   irDataCP[0] = m_raw[776];

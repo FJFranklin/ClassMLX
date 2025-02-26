@@ -58,6 +58,9 @@ static const char *s_hex = "0123456789ABCDEF";
 class MLX {
 private:
   float    m_cam[32*24];
+public:
+  const float *get_frame() const { return m_cam; }
+private:
   uint16_t m_raw[32*26];
 
   uint8_t m_buffer[64];
@@ -72,6 +75,10 @@ private:
   bool m_bCalcT;
 
   float m_ambient;
+
+  mlx_Mode m_Mode;
+  mlx_RefreshRate m_RefreshRate;
+  mlx_Resolution m_Resolution;
 
   struct MLX_Parameters {
     int16_t  kVdd;
@@ -110,7 +117,10 @@ public:
     m_row(26),
     m_bCycling(false),
     m_bCalcT(false),
-    m_ambient(0.0)
+    m_ambient(0.0),
+    m_Mode(MLX90640_CHESS),
+    m_RefreshRate(MLX90640_2_HZ),
+    m_Resolution(MLX90640_ADC_19BIT)
   {
     // ...
   }
@@ -187,6 +197,9 @@ public:
   void begin() {
     m_i2c.begin(1000000U);
     read_eeprom();
+    m_Mode = get_mode();
+    m_RefreshRate = get_refresh_rate();
+    m_Resolution = get_resolution();
   }
   bool busy() {
     return !m_i2c.finished();
@@ -220,6 +233,7 @@ public:
       }
       i2c_write_sync(regaddr, &regvalue);
     }
+    m_Mode = get_mode();
   }
   mlx_Mode get_mode() {
     const uint16_t regaddr = MLX90640_CONTROL1;
@@ -236,6 +250,7 @@ public:
     regvalue &= ~0x0380;
     regvalue |= static_cast<uint16_t>(rate) << 7;
     i2c_write_sync(regaddr, &regvalue);
+    m_RefreshRate = get_refresh_rate();
   }
   mlx_RefreshRate get_refresh_rate() {
     const uint16_t regaddr = MLX90640_CONTROL1;
@@ -253,6 +268,7 @@ public:
     regvalue &= ~0x0C00;
     regvalue |= static_cast<uint16_t>(resolution) << 10;
     i2c_write_sync(regaddr, &regvalue);
+    m_Resolution = get_resolution();
   }
   mlx_Resolution get_resolution() {
     const uint16_t regaddr = MLX90640_CONTROL1;
