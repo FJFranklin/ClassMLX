@@ -13,9 +13,9 @@ color_ranges = [
     [   0, (  0,  0,255),   5, ( 46,139, 87) ],
     [ -40, (218,240,255),   0, (102,190,249) ]]
 
-def map_temperatures_to_colors(temperature_matrix):
+def map_temperatures_to_colors(temperature_list):
     rgblist = []
-    for T in temperature_matrix.flatten():
+    for T in temperature_list:
         rgb = (0, 0, 0) # default to black
         for cr in color_ranges:
             T_min, rgb_min, T_max, rgb_max = cr
@@ -43,17 +43,27 @@ T_hi = 216
 Tlist = np.linspace(T_lo, T_hi, Nrow * Ncol)
 T_mat = Tlist.reshape((Nrow,Ncol))
 
-color = map_temperatures_to_colors(T_mat)
+Nbin = 16
+bins = np.linspace(T_lo, T_hi, Nbin + 1)
+binc = map_temperatures_to_colors((bins[:-1] + bins[1:])/2)
+
+color = map_temperatures_to_colors(Tlist)
 
 cmap = ListedColormap(color)
 coll = PatchCollection(patch, cmap=cmap)
 coll.set_array(np.arange(len(patch)))
 
-fig, ax = plt.subplots()
-ax.add_collection(coll)
+plt.rcParams['figure.figsize'] = [12, 4]
+fig, (axl, axr) = plt.subplots(1, 2)
+axl.add_collection(coll)
+_, _, H = axr.hist(Tlist, bins, lw=1, ec="grey")
 
-plt.xlim([0,Ncol])
-plt.ylim([0,Nrow])
+for rgb, rect in zip(binc, H.patches):
+    rect.set(fc=rgb)
+
+axl.set_xlim([0,Ncol])
+axl.set_ylim([0,Nrow])
+axr.set_ylim(top=100)
 
 bCycle = True
 def on_close(event):
@@ -67,5 +77,9 @@ plt.show(block=False)
 while bCycle:
     plt.pause(0.5)
     T_mat = np.random.uniform(T_lo, T_hi, (Nrow,Ncol))
-    color = map_temperatures_to_colors(T_mat)
+    Tlist = T_mat.flatten()
+    color = map_temperatures_to_colors(Tlist)
     coll.cmap = ListedColormap(color)
+    n, _ = np.histogram(Tlist, bins)
+    for count, rect in zip(n, H.patches):
+        rect.set_height(count)
