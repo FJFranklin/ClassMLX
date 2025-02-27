@@ -29,8 +29,13 @@ void setup() {
 }
 
 void loop() {
-  if (s_cam.cycle()) {
+  unsigned long dt = 0;
+
+  if (s_cam.cycle(&dt)) {
     Serial.print("Ambient temperature: ");
-    Serial.println(s_cam.get_ambient());
+    Serial.print(s_cam.get_ambient());
+    Serial.print(" degC, read time = ");
+    Serial.print(dt);
+    Serial.println(" us.");
   }
 }

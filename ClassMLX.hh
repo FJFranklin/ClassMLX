@@ -68,6 +68,11 @@ private:
 
   I2CMaster &m_i2c;
 
+  uint16_t *m_async_word_buffer; // if non-zero, then async_read is working
+  uint16_t  m_async_word_count;
+
+  elapsedMicros m_timer;
+
   uint16_t m_subpage;
 
   int  m_row;
@@ -113,6 +118,8 @@ public:
   MLX(I2CMaster &i2c, uint8_t address = MLX90640_I2CADDR_DEFAULT) :
     m_address(address),
     m_i2c(i2c),
+    m_async_word_buffer(0),
+    m_async_word_count(0),
     m_subpage(0),
     m_row(26),
     m_bCycling(false),
@@ -138,8 +145,23 @@ private:
   float calculate_ambient(float vdd);
   void  calculate_temperatures();
 
-  bool i2c_read_sync(uint16_t regaddr, uint16_t *word_buffer, uint16_t word_count = 1) {
-    if (!word_count || !word_buffer || busy()) return false;
+public:
+  void begin() {
+    m_i2c.begin(1000000U);
+    read_eeprom();
+    m_Mode = get_mode();
+    m_RefreshRate = get_refresh_rate();
+    m_Resolution = get_resolution();
+  }
+private:
+  bool i2c_busy() {
+    return !m_i2c.finished();
+  }
+  bool i2c_async_in_progress() const {
+    return m_async_word_buffer;
+  }
+  bool i2c_read_async_begin(uint16_t regaddr, uint16_t *word_buffer, uint16_t word_count) {
+    if (!word_count || !word_buffer || i2c_busy() || i2c_async_in_progress()) return false;
 
     if (word_count > 32) return false;
 
@@ -154,23 +176,44 @@ private:
       Serial.print("[i2c-write-error]");
       return false;
     }
-    m_i2c.read_async(m_address, m_buffer, byte_count, true);
-    while (!m_i2c.finished());
-    if (m_i2c.has_error()) {
-      Serial.print("[i2c-read-error]");
-      return false;
-    }
 
-    uint8_t *ptr = m_buffer;
-    for (int i = 0; i < word_count; i++) {
-      uint16_t hi = *ptr++;
-      uint16_t lo = *ptr++;
-      word_buffer[i] = hi << 8 | lo;
-    }
+    // save for later
+    m_async_word_buffer = word_buffer;
+    m_async_word_count  = word_count;
+
+    m_i2c.read_async(m_address, m_buffer, byte_count, true);
+
     return true;
   }
+  bool i2c_read_async_end() {
+    if (!i2c_async_in_progress()) return false;
+
+    while (!m_i2c.finished());
+
+    bool bReadError = m_i2c.has_error();
+    if (bReadError) {
+      Serial.print("[i2c-read-error]");
+    } else {
+      uint8_t *ptr = m_buffer;
+      for (int i = 0; i < m_async_word_count; i++) {
+	uint16_t hi = *ptr++;
+	uint16_t lo = *ptr++;
+	m_async_word_buffer[i] = hi << 8 | lo;
+      }
+    }
+    m_async_word_buffer = 0;
+    m_async_word_count  = 0;
+
+    return !bReadError;
+  }
+  bool i2c_read_sync(uint16_t regaddr, uint16_t *word_buffer, uint16_t word_count = 1) {
+    if (!i2c_read_async_begin(regaddr, word_buffer, word_count)) {
+      return false;
+    }
+    return i2c_read_async_end();
+  }
   bool i2c_write_sync(uint16_t regaddr, uint16_t *word_buffer, uint16_t word_count = 1) {
-    if (!word_count || !word_buffer || busy()) return false;
+    if (!word_count || !word_buffer || i2c_busy()) return false;
 
     if (word_count > 31) return false;
 
@@ -193,18 +236,6 @@ private:
     }
     return true;
   }
-public:
-  void begin() {
-    m_i2c.begin(1000000U);
-    read_eeprom();
-    m_Mode = get_mode();
-    m_RefreshRate = get_refresh_rate();
-    m_Resolution = get_resolution();
-  }
-  bool busy() {
-    return !m_i2c.finished();
-  }
-private:
   bool data_ready(uint16_t &subpage) {
     static uint16_t regaddr = MLX90640_STATUS1;
     uint16_t regvalue = 0;
@@ -305,31 +336,42 @@ public:
     }
     m_bCycling = cycling;
   }
-  bool cycle() { // returns true if temperatures updated
-    bool bUpdated = false;
+  bool cycle(unsigned long *dt = 0) { // returns true if temperatures updated
+    if (!m_bCycling) return false; // we're not in cycling mode
+    if (i2c_busy())  return false; // come back later...
 
-    if (!m_bCycling) return bUpdated;
-
-    if (m_bCalcT) {
+    if (m_bCalcT) { // end of cycle
       m_bCalcT = false;
       calculate_temperatures();
-      bUpdated = true;
-    } else if (m_row == 26) { // we're waiting for new data
+      if (dt) *dt = m_timer;
+      return true;
+    }
+	
+    if (i2c_async_in_progress()) { // finish what we started
+      i2c_read_async_end();
+
+      if (++m_row == 26) {
+	m_bCalcT = true; // this is the last read; next time calculate the temperatures
+	return false;
+      }
+    }
+
+    if (m_row == 26) {   // we're waiting for new data
       uint16_t subpage = 0;
       if (data_ready(subpage)) {
 	clear_data_ready();
 	m_subpage = subpage;
-	m_row = -1;    // now we're ready to collect
+	m_row = 0;       // now we're ready to collect
       }
     } else {
-      if (++m_row == 26) {
-	m_bCalcT = true; // this is the last read; next time calculate the temperatures
+      if (!m_row) {      // starting a new collection sequence; reset the timer
+	m_timer = 0;
       }
       uint16_t *rowdata = m_raw  + (m_row << 5);
       uint16_t  regaddr = 0x0400 + (m_row << 5);
-      i2c_read_sync(regaddr, rowdata, 32);
+      i2c_read_async_begin(regaddr, rowdata, 32);
     }
-    return bUpdated;
+    return false;
   }
 };
 
