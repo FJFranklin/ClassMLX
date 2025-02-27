@@ -5,7 +5,10 @@
  * Open Source under the MIT License - see LICENSE in the project's root folder
  */
 
-#include "config.hh"
+#include <Arduino.h>
+
+#define ENABLE_FEEDBACK   // echo received commands to Serial, if available
+
 #include <Shell.hh>
 #include <ClassMLX.hh>
 
@@ -17,10 +20,6 @@ using namespace MultiShell;
 #define Central_BufferLength 128 // print buffer length
 
 ShellStream serial_zero(Serial);
-
-#ifdef FEATHER_M0_BTLE
-ShellStream serial_btle(ShellStream::m_bt_onboard);
-#endif
 
 Command sc_hello ("hello",      "hello",                        "Say hi :-)");
 Command sc_irmode("mode",       "mode [Chess|Interleaved]",     "IRCam acquisition mode");
@@ -93,9 +92,6 @@ class IRCam : public Timer, public ShellHandler, public ShellStream::Responder {
 private:
   CommandList m_list;
   Shell  m_zero;
-#ifdef FEATHER_M0_BTLE
-  Shell  m_btle;
-#endif
   Shell *m_last;
 
   MLX m_cam;
@@ -113,9 +109,6 @@ public:
   IRCam() :
     m_list(this),
     m_zero(serial_zero, m_list, 'u'),
-#ifdef FEATHER_M0_BTLE
-    m_btle(serial_btle, m_list, 'b'),
-#endif
     m_last(0),
     m_cam(Master), // teensy 4, i2c channel 0
     m_task_ir(m_cam.get_frame()),
@@ -129,10 +122,6 @@ public:
     m_list.add(sc_sshot);
 
     m_zero.set_handler(this); // Need to set shell handler for CommaComms
-#ifdef FEATHER_M0_BTLE
-    m_btle.set_handler(this);
-    serial_btle.set_responder(this); // connection messages
-#endif
     for (int row = 0; row < 24; row++) {
       m_ascii[row][32] = 0;   // zero-terminate each row of the matrix
     }
@@ -211,13 +200,6 @@ public:
 
   virtual void every_tenth(int tenth) { // runs once every tenth of a second, where tenth = 0..9
     digitalWrite(LED_BUILTIN, tenth == 0 || tenth == 8 || (tenth == 9 && m_bCamData));
-
-#ifdef FEATHER_M0_BTLE
-    m_btle.update();
-  /*if (m_bCamData && !(tenth & 0x01)) {
-      m_btle << "The quick brown fox jumps over the lazy dog. 0123456789ABCDEF" << 0;
-    }*/
-#endif
   }
 
   virtual void every_second() { // runs once every second
@@ -356,14 +338,6 @@ void setup() {
   delay(500);
 
   serial_zero.begin(115200); // Shell on USB
-
-#ifdef FEATHER_M0_BTLE
-  const char* status = 0;
-  serial_btle.begin(status); // Shell on Bluetooth
-  if (status && Serial) {
-    Serial.println(status);
-  }
-#endif
 
   pinMode(LED_BUILTIN, OUTPUT);
 
