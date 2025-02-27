@@ -26,6 +26,7 @@ Command sc_irmode("mode",       "mode [Chess|Interleaved]",     "IRCam acquisiti
 Command sc_irrate("rate",       "rate [0.5|1|2|4|8|16|32|64]",  "IRCam frame rate");
 Command sc_irres ("resolution", "resolution [16-19]",           "IRCam bit resolution");
 Command sc_sshot ("snapshot",   "snapshot [ambient|ascii|b64]", "IRCam: take a snapshot [default: ambient]");
+Command sc_ssauto("auto",       "auto [on|off]",                "Take snapshots automatically.");
 
 class Task_IRCam : public Task {
 private:
@@ -103,7 +104,9 @@ private:
   ShellBuffer m_B;
 
   char m_ascii[24][33]; // matrix of characters for ASCII representation
-  bool m_bCamData;
+
+  bool m_bAuto;
+  bool m_bAutoPrint;
 
 public:
   IRCam() :
@@ -113,13 +116,15 @@ public:
     m_cam(Master), // teensy 4, i2c channel 0
     m_task_ir(m_cam.get_frame()),
     m_B(m_buffer, Central_BufferLength),
-    m_bCamData(false)
+    m_bAuto(false),
+    m_bAutoPrint(false)
   {
     m_list.add(sc_hello);     // The handler for the list is set in the constructor above
     m_list.add(sc_irmode);
     m_list.add(sc_irrate);
     m_list.add(sc_irres);
     m_list.add(sc_sshot);
+    m_list.add(sc_ssauto);
 
     m_zero.set_handler(this); // Need to set shell handler for CommaComms
     for (int row = 0; row < 24; row++) {
@@ -141,14 +146,8 @@ public:
   }
 
   virtual void stream_notification(ShellStream& stream, const char *message) {
-    if (!strcmp(message, "Connected")) {
-      m_bCamData = true;
-    }
-    else if (!strcmp(message, "Disconnected")) {
-      m_bCamData = false;
-    }
 #ifdef ENABLE_FEEDBACK
-    else if (Serial) {
+    if (Serial) {
       Serial.print(stream.name());
       Serial.print(": notify: ");
       Serial.println(message);
@@ -178,8 +177,8 @@ public:
     unsigned long value = command.m_value;
 
     switch(command.m_command) {
-    case 'c':
-      m_bCamData = value;
+    case 'a':
+      m_bAuto = value;
       break;
     default:
       break;
@@ -188,10 +187,16 @@ public:
 
   virtual void every_milli() { // runs once a millisecond, on average
     if (m_cam.cycle()) {
-      // Serial.print("Ambient temperature: ");
-      // Serial.println(m_cam.get_ambient());
+      m_bAutoPrint = m_bAuto;  // finished a collection sequence, report it (if on auto)
     }
-    tick(); // force a tick, in case swamped
+    if (m_bAutoPrint) {
+      Task_IRCam *ir = m_owner_ir.pop();
+      if (ir) {
+	ir->reset();
+	m_zero << *ir;
+	m_bAutoPrint = false;
+      }
+    }
   }
 
   virtual void every_10ms() { // runs once every 10ms, on average
@@ -199,7 +204,7 @@ public:
   }
 
   virtual void every_tenth(int tenth) { // runs once every tenth of a second, where tenth = 0..9
-    digitalWrite(LED_BUILTIN, tenth == 0 || tenth == 8 || (tenth == 9 && m_bCamData));
+    digitalWrite(LED_BUILTIN, tenth == 0 || tenth == 8 || (tenth == 4 && m_bAuto));
   }
 
   virtual void every_second() { // runs once every second
@@ -295,7 +300,6 @@ public:
       }
     }
     else if (args == "snapshot") {
-      elapsedMicros timer;
       ++args;
       if (args == "b64") {
 	Task_IRCam *ir = m_owner_ir.pop();
@@ -327,6 +331,18 @@ public:
 	m_B.clear();
 	m_B.printf("IRCam: Ambient temperature = %.1f degC.", ambient);
 	origin << m_B << 0;
+      }
+    } else if (args == "auto") {
+      ++args;
+      if (args == "on") {
+	m_bAuto = true;
+      } else if (args == "off") {
+	m_bAuto = false;
+      } else {
+	if (m_bAuto)
+	  origin << "IRCam: Auto on" << 0;
+	else
+	  origin << "IRCam: Auto off" << 0;
       }
     }
 
