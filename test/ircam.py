@@ -78,6 +78,10 @@ def on_close(event):
 def update_figure():
     if args.show:
         Tlist = T_mat.flatten()
+        T_min = np.min(Tlist)
+        T_max = np.max(Tlist)
+        title = "Temp. [°C] Min={n:.2f} Max={x:.2f}".format(n=T_min, x=T_max)
+        axr.set_title(title)
         color = map_temperatures_to_colors(Tlist)
         coll.cmap = ListedColormap(color)
         n, _ = np.histogram(Tlist, bins)
@@ -151,6 +155,7 @@ if args.show:
 
     axl.set_xlim([0,Ncol])
     axl.set_ylim([0,Nrow])
+    axr.set_xlim([-40,216])
     axr.set_ylim(top=100)
 
     fig.canvas.mpl_connect('close_event', on_close)
