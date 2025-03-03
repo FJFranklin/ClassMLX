@@ -77,13 +77,6 @@ def update_figure(t):
                 video = cv2.VideoWriter(args.save, codec, fps, (width, height))
             video.write(img_frame)
 
-def csv_write_row(row, temperatures):
-    if csv is not None:
-        csv.write("{r}".format(r=row))
-        for t in temperatures:
-            csv.write(",{t:.2f}".format(t=t))
-        csv.write("\n")
-
 def set_pixel_temperature(row, col, T): # range is -40 .. 216 degC
     global T_mat
     T_mat[row,col] = T
